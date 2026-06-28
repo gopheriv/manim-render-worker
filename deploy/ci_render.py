@@ -1,8 +1,10 @@
-"""CI script for rendering Manim scenes.
+"""Self-contained CI render script for the GitHub Actions worker.
 
-Reads CODE_GZ (gzip+base64 encoded Python code) from environment,
-decodes it, renders using Manim, and outputs the video.
+Reads the scene code + params from env, renders with Manim, and writes the
+result to out/render.mp4. Has NO project dependencies so a minimal public
+worker repo needs only this file + .github/workflows/render.yml.
 """
+
 import base64
 import gzip
 import os
@@ -11,61 +13,60 @@ import subprocess
 import sys
 from pathlib import Path
 
-def main():
-    code_gz = os.environ.get("CODE_GZ", "")
-    quality = os.environ.get("QUALITY", "-qh")
-    fps = os.environ.get("FPS", "60")
-    job_id = os.environ.get("JOB_ID", "render")
+ROOT = Path.cwd()
+MEDIA = ROOT / "media"
+OUT = ROOT / "out"
 
-    if not code_gz:
-        print("ERROR: CODE_GZ environment variable not set")
-        sys.exit(1)
 
-    # Decode the code
+def fail(msg: str) -> "None":
+    print(f"::error::{msg}", flush=True)
+    sys.exit(1)
+
+
+def main() -> None:
+    blob = os.environ.get("CODE_GZ", "")
+    quality = os.environ.get("QUALITY", "-qh").strip() or "-qh"
+    fps = os.environ.get("FPS", "60").strip() or "60"
+    job_id = os.environ.get("JOB_ID", "job").strip()
+    if not blob:
+        fail("CODE_GZ env is empty")
+
     try:
-        code_bytes = base64.b64decode(code_gz)
-        code = gzip.decompress(code_bytes).decode('utf-8')
-    except Exception as e:
-        print(f"ERROR: Failed to decode CODE_GZ: {e}")
-        sys.exit(1)
+        code = gzip.decompress(base64.b64decode(blob)).decode("utf-8")
+    except Exception as e:  # noqa: BLE001
+        fail(f"could not decode CODE_GZ: {e}")
 
-    # Write to scene.py
-    scene_path = Path("scene.py")
-    scene_path.write_text(code, encoding='utf-8')
+    if "class GenScene" not in code or "def construct" not in code:
+        fail("scene must define class GenScene with a construct method")
 
-    # Create output directory
-    out_dir = Path("out")
-    out_dir.mkdir(exist_ok=True)
+    scene = ROOT / "scene.py"
+    scene.write_text(code, encoding="utf-8")
 
-    # Render with Manim
-    cmd = [
-        "manim",
-        "scene.py",
-        "GenScene",
-        quality,
-        "--fps", fps,
-        "--media_dir", "./media",
-        "-o", "render.mp4"
-    ]
+    # Syntax check before the expensive render
+    pc = subprocess.run([sys.executable, "-m", "py_compile", str(scene)],
+                        capture_output=True, text=True)
+    if pc.returncode != 0:
+        fail(f"python syntax error:\n{(pc.stderr or pc.stdout)[-1500:]}")
 
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    cmd = ["manim", quality, "--fps", fps, "--media_dir", str(MEDIA),
+           str(scene), "GenScene"]
+    print("Running:", " ".join(cmd), flush=True)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout)[-2000:]
+        fail(f"manim render failed (exit {r.returncode}):\n{tail}")
 
-    if result.returncode != 0:
-        print(f"ERROR: Manim failed with code {result.returncode}")
-        print(f"STDOUT:\n{result.stdout}")
-        print(f"STDERR:\n{result.stderr}")
-        sys.exit(1)
+    mp4s = sorted((MEDIA / "videos").rglob("GenScene.mp4"),
+                  key=lambda p: p.stat().st_size, reverse=True)
+    mp4s = [p for p in mp4s if p.stat().st_size > 1024]
+    if not mp4s:
+        fail("manim exited 0 but no GenScene.mp4 was produced")
 
-    # Find the rendered video
-    video_files = list(Path("media/videos").rglob("render.mp4"))
-    if not video_files:
-        print("ERROR: No render.mp4 found in media/videos")
-        sys.exit(1)
+    OUT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(mp4s[0], OUT / "render.mp4")
+    size_kb = (OUT / "render.mp4").stat().st_size / 1024
+    print(f"::notice::rendered job {job_id} -> out/render.mp4 ({size_kb:.0f} KB)", flush=True)
 
-    # Copy to out directory
-    shutil.copy(video_files[0], out_dir / "render.mp4")
-    print(f"SUCCESS: Rendered to out/render.mp4")
 
 if __name__ == "__main__":
     main()

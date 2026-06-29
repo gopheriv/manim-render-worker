@@ -1,4 +1,10 @@
 name: render
+run-name: render ${{ inputs.job_id }}
+
+# Free cloud Manim render worker. Dispatched by the bot's cloud_render.py.
+# On a PUBLIC repo this runs on a 4 vCPU / 16 GB runner with unlimited minutes —
+# enough for 1080p, Surfaces/3D and parallel best-of-N drafts.
+
 on:
   workflow_dispatch:
     inputs:
@@ -16,16 +22,15 @@ on:
       job_id:
         description: "unique id (also the artifact suffix)"
         required: true
-run-name: render ${{ inputs.job_id }}
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: System deps
+      - name: System deps (LaTeX, cairo, pango, ffmpeg)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -39,7 +44,7 @@ jobs:
           cache: pip
 
       - name: Install Manim
-        run: pip install -r requirements.txt
+        run: pip install "manim>=0.18,<0.21" numpy
 
       - name: Render
         env:

@@ -1,0 +1,32 @@
+from manim import *
+
+class AetherLabScene(Scene):
+    def construct(self):
+        self.camera.background_color = "#071923"
+        header = Text("PHYSLAB  |  UNT PHYSICS  |  KZ / RU / EN", font_size=18, color="#91AAB8")
+        header.to_edge(UP, buff=0.3)
+        rule = Line(LEFT * 6.5, RIGHT * 6.5, color="#25445A", stroke_width=2).shift(UP * 2.75)
+        title = Text("UNT-STYLE GRAPH QUESTION", font_size=34, color="#EDF4F7", weight="BOLD")
+        title.next_to(rule, DOWN, buff=0.35)
+        self.add(header, rule)
+        self.play(FadeIn(title, shift=DOWN * 0.15), run_time=1)
+        axes = Axes(x_range=[0, 4, 1], y_range=[0, 5, 1], x_length=6.0, y_length=3.8, tips=False, axis_config={"color": "#91AAB8", "include_numbers": True, "font_size": 18}).shift(LEFT * 2.0 + DOWN * 0.15)
+        line1 = Line(axes.c2p(0, 0), axes.c2p(1, 4), color="#EDF4F7", stroke_width=5)
+        line2 = Line(axes.c2p(1, 4), axes.c2p(3, 4), color="#EDF4F7", stroke_width=5)
+        line3 = Line(axes.c2p(3, 4), axes.c2p(4, 0), color="#EDF4F7", stroke_width=5)
+        motion_path = VMobject().set_points_as_corners([axes.c2p(0, 0), axes.c2p(1, 4), axes.c2p(3, 4), axes.c2p(4, 0)])
+        marker = Dot(axes.c2p(0, 0), radius=0.09, color="#FF7A90")
+        tri1 = Polygon(axes.c2p(0, 0), axes.c2p(1, 0), axes.c2p(1, 4), fill_color="#FFC857", fill_opacity=0.7, stroke_width=0)
+        rect = Polygon(axes.c2p(1, 0), axes.c2p(3, 0), axes.c2p(3, 4), axes.c2p(1, 4), fill_color="#35D8C2", fill_opacity=0.65, stroke_width=0)
+        tri2 = Polygon(axes.c2p(3, 0), axes.c2p(4, 0), axes.c2p(3, 4), fill_color="#A78BFA", fill_opacity=0.7, stroke_width=0)
+        ask = Text("Find distance during 0–4 s", font_size=25, color="#EDF4F7").move_to(RIGHT * 3.5 + UP * 1.5)
+        areas = Text("2 m  +  8 m  +  2 m", font_size=31, color="#FFC857").move_to(RIGHT * 3.5 + UP * 0.45)
+        answer = Text("B  |  12 m", font_size=44, color="#35D8C2").move_to(RIGHT * 3.5 + DOWN * 0.6)
+        source = Text("Testcenter-3  •  task 1, p.2  •  key p.37", font_size=17, color="#91AAB8").move_to(DOWN * 3.1)
+        self.play(Create(axes), FadeIn(ask), FadeIn(marker), run_time=1)
+        self.play(FadeIn(tri1), Create(line1), run_time=1)
+        self.play(FadeIn(rect), Create(line2), run_time=1)
+        self.play(FadeIn(tri2), Create(line3), Succession(marker.animate.move_to(axes.c2p(1, 4)), marker.animate.move_to(axes.c2p(3, 4)), marker.animate.move_to(axes.c2p(4, 0))), run_time=1)
+        self.play(Write(areas), run_time=1)
+        self.play(Write(answer), FadeIn(source), run_time=1)
+        self.wait(36.0)

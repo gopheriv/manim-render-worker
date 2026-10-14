@@ -13,7 +13,7 @@ on:
         required: true
         default: l
         type: choice
-        options: [l, m, h, k]
+        options: [l, m, h, p, k]
       fps:
         description: Frames per second
         required: true

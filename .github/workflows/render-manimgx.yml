@@ -1,0 +1,69 @@
+name: render-manimgx
+run-name: render-manimgx ${{ inputs.job_id }}
+
+# Free cloud ManimGX render worker for the experiment_manim project.
+# Dispatched by experiment_manim/cloud/cloud_experiment.py. Runs on a PUBLIC
+# repo's 4 vCPU / 16 GB runner. ManimGX's Linux wheels bundle Mesa lavapipe,
+# so ubuntu-latest renders CPU-only with no GPU and no extra system packages.
+# ManimGX needs Python 3.13+; classic-Manim LaTeX/cairo system deps are NOT
+# needed (Typst/fonts/x264 are bundled in the wheel).
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_gz:
+        description: "gzip+base64 of the ManimGX scene code"
+        required: true
+      scene:
+        description: "scene class name to render (e.g. SquareToCircle)"
+        required: true
+      resolution:
+        description: "pixels WxH (ManimGX -r flag)"
+        required: false
+        default: "1280x720"
+      fps:
+        description: "frames per second"
+        required: false
+        default: "30"
+      job_id:
+        description: "unique id (also the artifact suffix)"
+        required: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    # Must stay COMFORTABLY above ci_render_manimgx.py's RENDER_TIMEOUT_S
+    # (default 30 min) PLUS pip setup (~5 min cold), so the harness owns its
+    # own timeout and surfaces a real error instead of an opaque cancellation.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install ManimGX
+        run: pip install "manimgx==0.1.1"
+
+      - name: Render
+        env:
+          CODE_GZ: ${{ inputs.code_gz }}
+          SCENE: ${{ inputs.scene }}
+          RESOLUTION: ${{ inputs.resolution }}
+          FPS: ${{ inputs.fps }}
+          JOB_ID: ${{ inputs.job_id }}
+        # pipefail so a failure fails the step with its real exit code;
+        # ci_render_manimgx.py prints the full error to this log on failure.
+        run: |
+          set -euo pipefail
+          python deploy/ci_render_manimgx.py
+
+      - name: Upload video + storyboard
+        uses: actions/upload-artifact@v5
+        with:
+          name: render-${{ inputs.job_id }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 1

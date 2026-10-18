@@ -1,5 +1,5 @@
 name: AetherLab Cloud Render
-run-name: AetherLab render ${{ inputs.job_id }}
+run-name: AetherLab render ${{ inputs.job_id }} attempt ${{ inputs.dispatch_id }}
 
 on:
   workflow_dispatch:
@@ -7,6 +7,11 @@ on:
       job_id:
         description: Stable render job id
         required: true
+        type: string
+      dispatch_id:
+        description: Unique identifier for this render attempt
+        required: false
+        default: ""
         type: string
       quality:
         description: Manim quality flag
@@ -57,6 +62,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref_name }}
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -69,14 +75,18 @@ jobs:
             -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends \
             libcairo2-dev libpango1.0-dev pkg-config
-          if [ "${{ inputs.needs_latex }}" = "true" ]; then
+          if [ "$NEEDS_LATEX" = "true" ]; then
             sudo apt-get install -y --no-install-recommends \
               texlive-latex-extra dvisvgm
           fi
+        env:
+          NEEDS_LATEX: ${{ inputs.needs_latex }}
 
+      # The configured render repository receives this workflow and each scene
+      # file, not AetherLab's pyproject.toml or uv.lock. Keep its direct worker
+      # dependencies pinned here so it runs in that repository independently.
       - name: Install pinned Manim
         run: |
-          python -m pip install --upgrade pip
           python -m pip install "manim==0.21.0" "imageio-ffmpeg==0.6.0"
           python - <<'PY'
           import importlib.metadata as m
@@ -98,11 +108,34 @@ jobs:
         shell: bash
         env:
           SCENE_CLASS: ${{ inputs.class_name }}
+          SCENE_PATH: ${{ inputs.scene_path }}
           RENDER_JOB_ID: ${{ inputs.job_id }}
+          RENDER_QUALITY: ${{ inputs.quality }}
+          RENDER_FPS: ${{ inputs.fps }}
           RENDER_WIDTH: ${{ inputs.width }}
           RENDER_HEIGHT: ${{ inputs.height }}
         run: |
           set +e
+          if [[ ! "$RENDER_JOB_ID" =~ ^[A-Za-z0-9._-]{1,80}$ ]]; then
+            echo 'Invalid render job id.' >&2
+            exit 2
+          fi
+          if [[ ! "$SCENE_CLASS" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo 'Invalid Manim scene class.' >&2
+            exit 2
+          fi
+          if [[ "$SCENE_PATH" == /* || "$SCENE_PATH" == .. || "$SCENE_PATH" == ../* || "$SCENE_PATH" == */../* || ! -f "$SCENE_PATH" ]]; then
+            echo 'Scene path must identify a committed file inside the checkout.' >&2
+            exit 2
+          fi
+          if [[ ! "$RENDER_QUALITY" =~ ^[lmhpk]$ ]]; then
+            echo 'Invalid Manim quality.' >&2
+            exit 2
+          fi
+          if [[ ! "$RENDER_FPS" =~ ^[1-9][0-9]{0,2}$ ]] || (( RENDER_FPS > 240 )); then
+            echo 'Invalid render FPS.' >&2
+            exit 2
+          fi
           mkdir -p out
           size_args=()
           if [ "${RENDER_WIDTH:-0}" != "0" ] || [ "${RENDER_HEIGHT:-0}" != "0" ]; then
@@ -117,16 +150,16 @@ jobs:
             size_args=(-r "${RENDER_WIDTH},${RENDER_HEIGHT}")
           fi
           /usr/bin/time -f 'AETHERLAB_RENDER_WALL_SECONDS=%e\nAETHERLAB_PEAK_RSS_KB=%M' \
-            -o "${{ inputs.job_id }}.telemetry" python -m manim render \
-            -q${{ inputs.quality }} \
-            --fps "${{ inputs.fps }}" \
+            -o "${RENDER_JOB_ID}.telemetry" python -m manim render \
+            "-q${RENDER_QUALITY}" \
+            --fps "$RENDER_FPS" \
             "${size_args[@]}" \
             --disable_caching \
             --media_dir out \
-            "${{ inputs.scene_path }}" \
-            "${{ inputs.class_name }}" 2>&1 | tee "${{ inputs.job_id }}.log"
+            "$SCENE_PATH" \
+            "$SCENE_CLASS" 2>&1 | tee "${RENDER_JOB_ID}.log"
           code=${PIPESTATUS[0]}
-          cat "${{ inputs.job_id }}.telemetry" | tee -a "${{ inputs.job_id }}.log"
+          cat "${RENDER_JOB_ID}.telemetry" | tee -a "${RENDER_JOB_ID}.log"
           if [ "$code" -ne 0 ]; then
             exit "$code"
           fi
